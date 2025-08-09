@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb~*
+.jupyter/
+
+# OS
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# Project specific
+generated_samples/
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# Data outputs
+data/outputs/
+!data/outputs/.gitkeep
+
+# Model weights and checkpoints
+*.bin
+*.pth
+*.pt
+*.safetensors
+checkpoints/
+
+# Logs and debug files
+logs/
+*.log
+
+# Environment and cache
+.mypy_cache/
+.coverage
+htmlcov/
+
+# HF and ML specific
+huggingface/
+.cache/
+/pixcell_env/
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local development
+local_config.py
+.env.local
