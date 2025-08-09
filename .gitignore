@@ -36,6 +36,7 @@ generated_samples/
 data/outputs/
 !data/outputs/.gitkeep
 
+# Data inputs
 data/inputs/
 !data/inputs/.gitkeep
 
