@@ -36,6 +36,9 @@ generated_samples/
 data/outputs/
 !data/outputs/.gitkeep
 
+data/inputs/
+!data/inputs/.gitkeep
+
 # Model weights and checkpoints
 *.bin
 *.pth
