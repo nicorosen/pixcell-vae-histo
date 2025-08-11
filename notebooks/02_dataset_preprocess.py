@@ -17,15 +17,14 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 import torch
-from huggingface_hub import hf_hub_download
-from diffusers import AutoencoderKL, DiffusionPipeline
-import timm
-from timm.data import resolve_data_config
-from timm.data.transforms_factory import create_transform
-import einops
 import shutil
 import random
 from datetime import datetime
+
+# Add the project root to the Python path to allow imports from 'src'
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.models.pixcell_vae_wrapper import PixCellVAELoader, DEFAULT_MODEL_CONFIG, ModelLoadingError
 
 try:
     import kagglehub
@@ -52,7 +51,7 @@ class Config:
         self.input_dir = Path(args.input_dir) if args.input_dir else PROJECT_ROOT / 'data' / 'inputs'
         self.output_dir = Path(args.output_dir) if args.output_dir else PROJECT_ROOT / 'data' / 'outputs' / 'reconstructions'
         
-        # Model parameters
+        # Model parameters (now managed by PixCellVAELoader)
         self.image_size = args.image_size
         self.device = 'mps' if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() else 'cpu'
         self.dtype = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -62,17 +61,13 @@ class Config:
         self.max_samples = args.max_samples
         self.skip_download = args.skip_download
         
-        # Model parameters
-        self.model_name = "StonyBrook-CVLab/PixCell-1024"
-        self.vae_name = "stabilityai/stable-diffusion-3.5-large"
-        self.uni_model_name = "hf-hub:MahmoodLab/UNI2-h"
-        
-        # Generation parameters
-        self.guidance_scale = args.guidance_scale
-        self.num_inference_steps = args.steps
+        # Generation parameters (now managed by PixCellVAELoader, but kept for args parsing)
+        # These are passed to PixCellVAELoader's model_config
+        # self.guidance_scale = args.guidance_scale # Removed, handled by PixCellVAELoader
+        # self.num_inference_steps = args.steps # Removed, handled by PixCellVAELoader
         
         # Random seed
-        self.seed = args.seed if args.seed is not None else 42
+        self.seed = args.seed if args.seed is not None else int(time.time()) # Use current timestamp as seed if not provided
         
         # Ensure directories exist
         os.makedirs(self.input_dir, exist_ok=True)
@@ -88,7 +83,7 @@ def parse_args():
     parser.add_argument('--output-dir', type=str, help='Directory to save processed images')
     
     # Dataset parameters
-    parser.add_argument('--kaggle-dataset', type=str, 
+    parser.add_argument('--kaggle-dataset', type=str,
                        default='sani84/glasmiccai2015-gland-segmentation',
                        help='Kaggle dataset identifier')
     parser.add_argument('--max-samples', type=int, default=12,
@@ -99,9 +94,9 @@ def parse_args():
     # Processing parameters
     parser.add_argument('--image-size', type=int, default=1024,
                        help='Size to resize images to (square)')
-    parser.add_argument('--steps', type=int, default=15,
+    parser.add_argument('--steps', type=int, default=25,
                        help='Number of inference steps')
-    parser.add_argument('--guidance-scale', type=float, default=1.5,
+    parser.add_argument('--guidance-scale', type=float, default=2.0,
                        help='Guidance scale for generation')
     
     # Control parameters
@@ -233,118 +228,25 @@ class PixCellReconstructor:
     def __init__(self, config, logger):
         self.config = config
         self.logger = logger
-        self.device = torch.device(config.device)
-        self.dtype = config.dtype
-        self.pipeline = None
-        self.uni_model = None
-        self.transform = None
+        self.pixcell_loader = None # Will be initialized in main
     
-    def load_models(self):
-        """Load all required models."""
-        self.logger.info("Loading models...")
-        start_time = time.time()
-        
-        try:
-            # Load VAE
-            vae = AutoencoderKL.from_pretrained(
-                self.config.vae_name,
-                subfolder="vae",
-                torch_dtype=self.dtype
-            )
-            
-            # Load PixCell pipeline
-            self.pipeline = DiffusionPipeline.from_pretrained(
-                self.config.model_name,
-                vae=vae,
-                custom_pipeline="StonyBrook-CVLab/PixCell-pipeline",
-                trust_remote_code=True,
-                torch_dtype=self.dtype,
-            )
-            self.pipeline.to(self.device)
-            
-            # Load UNI model
-            timm_kwargs = {
-                'img_size': 224,
-                'patch_size': 14,
-                'depth': 24,
-                'num_heads': 24,
-                'init_values': 1e-5,
-                'embed_dim': 1536,
-                'mlp_ratio': 2.66667*2,
-                'num_classes': 0,
-                'no_embed_class': True,
-                'mlp_layer': timm.layers.SwiGLUPacked,
-                'act_layer': torch.nn.SiLU,
-                'reg_tokens': 8,
-                'dynamic_img_size': True
-            }
-            
-            self.uni_model = timm.create_model(
-                self.config.uni_model_name,
-                pretrained=True,
-                **timm_kwargs
-            )
-            self.uni_model.eval()
-            self.uni_model.to(self.device)
-            
-            # Create transform
-            config = resolve_data_config(self.uni_model.pretrained_cfg, model=self.uni_model)
-            self.transform = create_transform(**config)
-            
-            self.logger.info(f"Models loaded in {time.time() - start_time:.2f}s")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error loading models: {e}")
-            return False
+    def load_models(self, pixcell_loader_instance):
+        """Assigns an already loaded PixCellVAELoader instance."""
+        self.pixcell_loader = pixcell_loader_instance
+        self.logger.info("PixCellVAELoader instance assigned.")
+        return True # Always returns True as loading is handled externally
     
     def encode(self, image):
-        """Encode image to latent representation."""
-        if self.uni_model is None or self.transform is None:
-            raise RuntimeError("Models not loaded. Call load_models() first.")
-        
-        # Convert PIL Image to numpy array
-        img_array = np.array(image)
-        
-        # Rearrange into 16 256x256 patches
-        patches = einops.rearrange(
-            img_array,
-            '(d1 h) (d2 w) c -> (d1 d2) h w c',
-            d1=4, d2=4
-        )
-        
-        # Apply transforms to each patch
-        patch_tensors = torch.stack([
-            self.transform(Image.fromarray(patch)) 
-            for patch in patches
-        ])
-        
-        # Get embeddings
-        with torch.inference_mode():
-            patch_tensors = patch_tensors.to(self.device)
-            embeddings = self.uni_model(patch_tensors)
-            
-        # Reshape to (batch_size, num_patches, embedding_dim)
-        return embeddings.unsqueeze(0)
+        """Encode image to latent representation using the PixCellVAELoader."""
+        if self.pixcell_loader is None:
+            raise RuntimeError("PixCellVAELoader not assigned. Call load_models() with an instance first.")
+        return self.pixcell_loader.encode(image)
     
     def decode(self, latent):
-        """Decode latent representation back to image."""
-        if self.pipeline is None:
-            raise RuntimeError("Pipeline not loaded. Call load_models() first.")
-            
-        # Get unconditional embedding for classifier-free guidance
-        uncond = self.pipeline.get_unconditional_embedding(latent.shape[0])
-        
-        # Generate image
-        with torch.amp.autocast(device_type=self.device.type):
-            result = self.pipeline(
-                uni_embeds=latent,
-                negative_uni_embeds=uncond,
-                guidance_scale=self.config.guidance_scale,
-                num_inference_steps=self.config.num_inference_steps
-            )
-            
-        return result.images[0]  # Return first (and only) image
+        """Decode latent representation back to image using the PixCellVAELoader."""
+        if self.pixcell_loader is None:
+            raise RuntimeError("PixCellVAELoader not assigned. Call load_models() with an instance first.")
+        return self.pixcell_loader.decode(latent)
 
 
 def plot_comparison(original, reconstructed, save_path=None, figsize=(10, 5)):
@@ -388,11 +290,11 @@ def main():
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Input directory: {config.input_dir}")
     logger.info(f"Output directory: {config.output_dir}")
-    logger.info(f"Device: {config.device}")
+    # Device and dtype are now managed by PixCellVAELoader
     logger.info(f"Image size: {config.image_size}")
     logger.info(f"Max samples: {config.max_samples}")
-    logger.info(f"Guidance scale: {config.guidance_scale}")
-    logger.info(f"Inference steps: {config.num_inference_steps}")
+    # logger.info(f"Guidance scale: {config.guidance_scale}") # Handled by PixCellVAELoader
+    # logger.info(f"Inference steps: {config.num_inference_steps}") # Handled by PixCellVAELoader
     logger.info(f"Random seed: {config.seed}")
     logger.info("==================")
     
@@ -405,11 +307,23 @@ def main():
             logger.error("No images available for processing")
             return
             
-        # Initialize reconstructor
-        reconstructor = PixCellReconstructor(config, logger)
-        if not reconstructor.load_models():
-            logger.error("Failed to load models")
+        # Initialize PixCellVAELoader with overrides from command line arguments
+        loader_config = DEFAULT_MODEL_CONFIG.copy()
+        if args.steps is not None:
+            loader_config['generation']['num_inference_steps'] = int(args.steps)
+        if args.guidance_scale is not None:
+            loader_config['generation']['guidance_scale'] = float(args.guidance_scale)
+        
+        pixcell_loader = PixCellVAELoader(model_config=loader_config, base_seed=config.seed, debug=args.debug)
+        try:
+            pixcell_loader.load_models()
+        except ModelLoadingError as e:
+            logger.error(f"Failed to load models via PixCellVAELoader: {e}")
             return
+
+        # Initialize reconstructor and assign the loaded PixCellVAELoader
+        reconstructor = PixCellReconstructor(config, logger)
+        reconstructor.load_models(pixcell_loader) # Pass the loaded instance
         
         # Process each image
         logger.info("Starting image reconstruction...")
@@ -425,14 +339,17 @@ def main():
                     reconstructed_img = reconstructor.decode(latent)
                     
                     # Save results
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     base_name = img_path.stem
-                    rec_path = config.output_dir / f'{base_name}_recon.png'
-                    comp_path = config.output_dir / f'{base_name}_comparison.png'
+                    
+                    # Include seed and timestamp in filenames
+                    rec_path = config.output_dir / f'{base_name}_recon_seed{config.seed}_{timestamp}.png'
+                    comp_path = config.output_dir / f'{base_name}_comparison_seed{config.seed}_{timestamp}.png'
                     
                     reconstructed_img.save(rec_path)
                     plot_comparison(original_img, reconstructed_img, comp_path)
                     
-                    logger.info(f"Processed: {img_path.name}")
+                    logger.info(f"Processed: {img_path.name} (saved as {rec_path.name} and {comp_path.name})")
                     
             except Exception as e:
                 logger.error(f"Error processing {img_path}: {e}", exc_info=args.debug)
