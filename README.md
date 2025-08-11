@@ -2,7 +2,7 @@
 
 Goal
 - Use the pretrained PixCell-1024 foundational VAE to generate synthetic histopathology images and perform reconstructions, starting small locally on macOS (MPS) and scaling later if needed.
-- Primary notebooks: [00_environment_check.ipynb](notebooks/00_environment_check.ipynb:1), [01_model_inference_pixcell.ipynb](notebooks/01_model_inference_pixcell.ipynb:1), [02_dataset_prep.ipynb](notebooks/02_dataset_prep.ipynb:1).
+- Primary notebooks: [00_environment_check.ipynb](notebooks/00_environment_check.ipynb:1), [01_model_inference_pixcell_updated.ipynb](notebooks/01_model_inference_pixcell_updated.ipynb:1), [02_dataset_prep.ipynb](notebooks/02_dataset_prep.ipynb:1).
 
 References
 - Model: https://huggingface.co/StonyBrook-CVLab/PixCell-1024
@@ -28,10 +28,10 @@ Requirements
 Repository Structure
 - notebooks/
   - 00_environment_check.ipynb
-  - 01_model_inference_pixcell.ipynb
-  - 02_dataset_prep.ipynb
+  - 01_model_inference_pixcell_updated.ipynb - Main notebook for generating synthetic histopathology images with customizable parameters
+  - 02_dataset_prep.ipynb - For processing and reconstructing histopathology images
+  - optimized_pixcell_inference.py - Optimized script for batch image generation
   - 04_evaluation_visual_metrics.ipynb (placeholder; add later)
-  - 05_export_and_sharing.ipynb (placeholder; add later)
 - src/utils/
   - io.py
   - viz.py
