@@ -70,14 +70,6 @@ class PixCellVAELoader:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
         self.dtype = torch.float16 if self.device.type == 'cuda' else torch.float32 # MPS/CPU prefer fp32
 
-        # Prefer the 256px model on MPS/CPU for speed; keep 1024 only on CUDA
-        if self.device.type != 'cuda' and self.model_config.get('pipeline_path', '').endswith('PixCell-1024'):
-            print("MPS/CPU detected: switching to PixCell-256 for faster inference.")
-            self.model_config['pipeline_path'] = "StonyBrook-CVLab/PixCell-256"
-            # Lighter defaults for non-CUDA (commented out to allow user-defined values)
-            # self.model_config['generation']['num_inference_steps'] = min(self.model_config['generation']['num_inference_steps'], 18)
-            # self.model_config['generation']['guidance_scale'] = 1.0
-        
         self.pipeline = None
         self.uni_model = None
         self.transform = None

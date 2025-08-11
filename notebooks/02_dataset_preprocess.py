@@ -68,6 +68,7 @@ class Config:
         
         # Random seed
         self.seed = args.seed if args.seed is not None else int(time.time()) # Use current timestamp as seed if not provided
+        self.pixcell_model_size = args.pixcell_model_size
         
         # Ensure directories exist
         os.makedirs(self.input_dir, exist_ok=True)
@@ -102,6 +103,8 @@ def parse_args():
     # Control parameters
     parser.add_argument('--seed', type=int, default=None,
                        help='Random seed for reproducibility')
+    parser.add_argument('--pixcell-model-size', type=int, default=1024, choices=[256, 1024],
+                       help='PixCell model size to use (256 or 1024)')
     parser.add_argument('--debug', action='store_true',
                        help='Enable debug output')
     
@@ -293,8 +296,9 @@ def main():
     # Device and dtype are now managed by PixCellVAELoader
     logger.info(f"Image size: {config.image_size}")
     logger.info(f"Max samples: {config.max_samples}")
-    # logger.info(f"Guidance scale: {config.guidance_scale}") # Handled by PixCellVAELoader
-    # logger.info(f"Inference steps: {config.num_inference_steps}") # Handled by PixCellVAELoader
+    logger.info(f"Guidance scale: {args.guidance_scale}")
+    logger.info(f"Inference steps: {args.steps}")
+    logger.info(f"PixCell model size: {config.pixcell_model_size}")
     logger.info(f"Random seed: {config.seed}")
     logger.info("==================")
     
@@ -314,6 +318,9 @@ def main():
         if args.guidance_scale is not None:
             loader_config['generation']['guidance_scale'] = float(args.guidance_scale)
         
+        # Override pipeline path based on user argument
+        loader_config['pipeline_path'] = f"StonyBrook-CVLab/PixCell-{config.pixcell_model_size}"
+
         pixcell_loader = PixCellVAELoader(model_config=loader_config, base_seed=config.seed, debug=args.debug)
         try:
             pixcell_loader.load_models()
