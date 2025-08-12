@@ -349,8 +349,9 @@ def main():
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     base_name = img_path.stem
                     
-                    # Include seed and timestamp in filenames
-                    rec_path = config.output_dir / f'{base_name}_recon_seed{config.seed}_{timestamp}.png'
+                    # Save reconstructed image with original filename
+                    rec_path = config.output_dir / f'{base_name}.png'
+                    # Save comparison plot with seed and timestamp
                     comp_path = config.output_dir / f'{base_name}_comparison_seed{config.seed}_{timestamp}.png'
                     
                     reconstructed_img.save(rec_path)
